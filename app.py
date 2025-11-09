@@ -25,6 +25,15 @@ def create_app():
     # Initialize database pool
     db.create_pool()
     
+    # Initialize Telegram service
+    from utils.telegram_service import init_telegram_service
+    if app.config.get('TELEGRAM_BOT_TOKEN') and app.config.get('TELEGRAM_ADMIN_CHAT_ID'):
+        init_telegram_service(
+            app.config['TELEGRAM_BOT_TOKEN'],
+            app.config['TELEGRAM_ADMIN_CHAT_ID']
+        )
+        print("✅ Telegram service initialized")
+    
     # Register blueprints
     from routes.auth_routes import auth_bp
     from routes.user_routes import user_bp
@@ -36,6 +45,7 @@ def create_app():
     from routes.wishlist_routes import wishlist_bp
     from routes.upload_routes import upload_bp
     from routes.verification_routes import verification_bp
+    from routes.support_routes import support_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(user_bp, url_prefix='/api/users')
@@ -47,6 +57,7 @@ def create_app():
     app.register_blueprint(wishlist_bp, url_prefix='/api/wishlist')
     app.register_blueprint(upload_bp, url_prefix='/api/upload')
     app.register_blueprint(verification_bp, url_prefix='/api/verification')
+    app.register_blueprint(support_bp, url_prefix='/api/support')
     
     @app.route('/api/health')
     def health():

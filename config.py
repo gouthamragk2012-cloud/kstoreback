@@ -34,3 +34,7 @@ class Config:
     MAIL_USERNAME = os.getenv('MAIL_USERNAME')  # Your Gmail address
     MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')  # Your Gmail App Password
     MAIL_DEFAULT_SENDER = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('MAIL_USERNAME'))
+    
+    # Telegram Bot Configuration
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_ADMIN_CHAT_ID = os.getenv('TELEGRAM_ADMIN_CHAT_ID')
