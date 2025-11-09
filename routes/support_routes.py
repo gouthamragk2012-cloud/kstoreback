@@ -22,6 +22,7 @@ def send_support_message():
     data = request.get_json()
     message_text = data.get('message')
     order_id = data.get('order_id')
+    skip_telegram = data.get('skip_telegram', False)  # Flag to skip Telegram notification
     
     if not message_text or not message_text.strip():
         return error_response('Message cannot be empty', 400)
@@ -57,11 +58,11 @@ def send_support_message():
         message_id, created_at = cursor.fetchone()
         conn.commit()
         
-        # Send Telegram notification to admin
+        # Send Telegram notification to admin (only if not skipped)
         customer_name = f"{first_name} {last_name}"
         telegram_message_id = None
         
-        if telegram_service:
+        if telegram_service and not skip_telegram:
             telegram_message_id = telegram_service.send_support_notification(
                 customer_name=customer_name,
                 customer_email=email,
@@ -143,21 +144,27 @@ def telegram_webhook():
     """
     try:
         data = request.get_json()
+        print(f"🔔 Webhook received: {data}")
         
         # Check if this is a reply to a message
         if 'message' not in data:
+            print("⚠️ No message in webhook data")
             return success_response({'ok': True})
         
         message = data['message']
         
         # Check if it's a reply
         if 'reply_to_message' not in message:
+            print("⚠️ Not a reply message")
             return success_response({'ok': True})
         
         reply_to_message_id = message['reply_to_message']['message_id']
         reply_text = message.get('text', '')
         
+        print(f"📨 Reply to message {reply_to_message_id}: {reply_text}")
+        
         if not reply_text:
+            print("⚠️ Empty reply text")
             return success_response({'ok': True})
         
         conn = db.get_connection()
@@ -173,9 +180,11 @@ def telegram_webhook():
             
             result = cursor.fetchone()
             if not result:
+                print(f"⚠️ No customer message found for telegram_message_id: {reply_to_message_id}")
                 return success_response({'ok': True})
             
             user_id, original_message_id = result
+            print(f"✅ Found customer message {original_message_id} for user {user_id}")
             
             # Save admin reply
             cursor.execute("""
@@ -195,6 +204,7 @@ def telegram_webhook():
             """, (original_message_id,))
             
             conn.commit()
+            print(f"✅ Admin reply saved with message_id: {admin_message_id}")
             
             # Get customer name for confirmation
             cursor.execute("""
@@ -206,6 +216,7 @@ def telegram_webhook():
                 customer_name = f"{user_data[0]} {user_data[1]}"
                 telegram_service.send_reply_confirmation(customer_name, reply_text)
             
+            print(f"🎉 Reply successfully processed and saved!")
             return success_response({'ok': True, 'message_id': admin_message_id})
             
         except Exception as e:
