@@ -3,6 +3,8 @@ from flask_jwt_extended import create_access_token, create_refresh_token, jwt_re
 from db_connection import db
 from utils.auth_utils import hash_password, verify_password
 from utils.response_utils import success_response, error_response
+from utils.email_service import generate_verification_code, send_verification_email
+from datetime import datetime, timedelta
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -29,17 +31,25 @@ def register():
         if cursor.fetchone():
             return error_response('Email already registered', 409)
         
-        # Create user
+        # Create user with verification code
         password_hash = hash_password(password)
+        verification_code = generate_verification_code()
+        verification_expires = datetime.now() + timedelta(minutes=15)
+        
         cursor.execute("""
-            INSERT INTO users (email, password_hash, first_name, last_name, phone, role)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING user_id, email, first_name, last_name, role, created_at
+            INSERT INTO users (email, password_hash, first_name, last_name, phone, role, 
+                             verification_token, verification_token_expires, is_verified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING user_id, email, first_name, last_name, role, created_at, is_verified
         """, (email, password_hash, data['first_name'], data['last_name'], 
-              data.get('phone'), data.get('role', 'customer')))
+              data.get('phone'), data.get('role', 'customer'),
+              verification_code, verification_expires, False))
         
         user = cursor.fetchone()
         conn.commit()
+        
+        # Send verification email
+        send_verification_email(user[1], user[2], verification_code)
         
         user_data = {
             'user_id': user[0],
@@ -47,17 +57,19 @@ def register():
             'first_name': user[2],
             'last_name': user[3],
             'role': user[4],
-            'created_at': user[5].isoformat()
+            'created_at': user[5].isoformat(),
+            'is_verified': user[6]
         }
         
-        access_token = create_access_token(identity=user[0])
-        refresh_token = create_refresh_token(identity=user[0])
+        access_token = create_access_token(identity=str(user[0]))
+        refresh_token = create_refresh_token(identity=str(user[0]))
         
         return success_response({
             'user': user_data,
             'access_token': access_token,
-            'refresh_token': refresh_token
-        }, 'Registration successful', 201)
+            'refresh_token': refresh_token,
+            'requires_verification': True
+        }, 'Registration successful. Please check your email for verification code.', 201)
         
     except Exception as e:
         conn.rollback()
@@ -81,7 +93,7 @@ def login():
     
     try:
         cursor.execute("""
-            SELECT user_id, email, password_hash, first_name, last_name, role, is_active
+            SELECT user_id, email, password_hash, first_name, last_name, role, is_active, is_verified, phone
             FROM users WHERE email = %s
         """, (email,))
         
@@ -102,11 +114,13 @@ def login():
             'email': user[1],
             'first_name': user[3],
             'last_name': user[4],
-            'role': user[5]
+            'role': user[5],
+            'is_verified': user[7],
+            'phone': user[8]
         }
         
-        access_token = create_access_token(identity=user[0])
-        refresh_token = create_refresh_token(identity=user[0])
+        access_token = create_access_token(identity=str(user[0]))
+        refresh_token = create_refresh_token(identity=str(user[0]))
         
         return success_response({
             'user': user_data,

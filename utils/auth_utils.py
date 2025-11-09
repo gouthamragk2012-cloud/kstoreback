@@ -20,6 +20,10 @@ def admin_required():
             verify_jwt_in_request()
             user_id = get_jwt_identity()
             
+            # Convert to int if it's a string
+            if isinstance(user_id, str):
+                user_id = int(user_id)
+            
             conn = db.get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT role FROM users WHERE user_id = %s", (user_id,))

@@ -21,8 +21,13 @@ def get_products():
     
     try:
         # Build query
-        where_clauses = ["p.is_active = TRUE"]
+        where_clauses = []
         params = []
+        
+        # For admin, show all products; for customers, only active ones
+        # Note: This endpoint is public, so we show only active by default
+        # Admin should use a different endpoint or parameter if needed
+        where_clauses.append("p.is_active = TRUE")
         
         if category_id:
             where_clauses.append("p.category_id = %s")
@@ -149,28 +154,148 @@ def get_product(product_id):
 def create_product():
     data = request.get_json()
     
-    required = ['sku', 'name', 'slug', 'price']
+    required = ['sku', 'name', 'slug', 'price', 'stock_quantity']
     if not all(field in data for field in required):
-        return error_response('Missing required fields')
+        return error_response('Missing required fields: ' + ', '.join(required))
     
     conn = db.get_connection()
     cursor = conn.cursor()
     
     try:
+        import json
+        
+        # Prepare dimensions as JSON string if provided
+        dimensions_json = None
+        if data.get('dimensions'):
+            dimensions_json = json.dumps(data['dimensions'])
+        
         cursor.execute("""
-            INSERT INTO products (sku, name, slug, description, short_description, price,
-                                compare_at_price, stock_quantity, category_id, brand, weight)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO products (
+                sku, name, slug, description, short_description, price,
+                compare_at_price, cost_price, stock_quantity, low_stock_threshold,
+                category_id, brand, weight, dimensions, is_featured, is_active,
+                meta_title, meta_description
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING product_id
-        """, (data['sku'], data['name'], data['slug'], data.get('description'),
-              data.get('short_description'), data['price'], data.get('compare_at_price'),
-              data.get('stock_quantity', 0), data.get('category_id'), 
-              data.get('brand'), data.get('weight')))
+        """, (
+            data['sku'],
+            data['name'],
+            data['slug'],
+            data.get('description'),
+            data.get('short_description'),
+            data['price'],
+            data.get('compare_at_price'),
+            data.get('cost_price'),
+            data['stock_quantity'],
+            data.get('low_stock_threshold', 10),
+            data.get('category_id'),
+            data.get('brand'),
+            data.get('weight'),
+            dimensions_json,  # JSONB field as JSON string
+            data.get('is_featured', False),
+            data.get('is_active', True),
+            data.get('meta_title'),
+            data.get('meta_description')
+        ))
         
         product_id = cursor.fetchone()[0]
         conn.commit()
         
-        return success_response({'product_id': product_id}, 'Product created', 201)
+        return success_response({'product_id': product_id}, 'Product created successfully', 201)
+        
+    except Exception as e:
+        conn.rollback()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error creating product: {e}")
+        print(f"Full traceback: {error_details}")
+        print(f"Data received: {data}")
+        return error_response(f'Failed to create product: {str(e)}', 500)
+    finally:
+        cursor.close()
+        db.return_connection(conn)
+
+
+@product_bp.route('/<int:product_id>', methods=['PUT'])
+@jwt_required()
+@admin_required()
+def update_product(product_id):
+    data = request.get_json()
+    
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if product exists
+        cursor.execute("SELECT product_id FROM products WHERE product_id = %s", (product_id,))
+        if not cursor.fetchone():
+            return error_response('Product not found', 404)
+        
+        # Build update query dynamically
+        update_fields = []
+        params = []
+        
+        allowed_fields = ['sku', 'name', 'slug', 'description', 'short_description', 
+                         'price', 'compare_at_price', 'cost_price', 'stock_quantity', 
+                         'low_stock_threshold', 'category_id', 'brand', 'weight', 
+                         'dimensions', 'is_featured', 'is_active', 'meta_title', 'meta_description']
+        
+        for field in allowed_fields:
+            if field in data:
+                update_fields.append(f"{field} = %s")
+                params.append(data[field])
+        
+        if not update_fields:
+            return error_response('No fields to update')
+        
+        # Add updated_at
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(product_id)
+        
+        query = f"UPDATE products SET {', '.join(update_fields)} WHERE product_id = %s"
+        cursor.execute(query, params)
+        conn.commit()
+        
+        return success_response({'product_id': product_id}, 'Product updated successfully')
+        
+    except Exception as e:
+        conn.rollback()
+        return error_response(str(e), 500)
+    finally:
+        cursor.close()
+        db.return_connection(conn)
+
+@product_bp.route('/<int:product_id>', methods=['DELETE'])
+@jwt_required()
+@admin_required()
+def delete_product(product_id):
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if product exists
+        cursor.execute("SELECT product_id, name FROM products WHERE product_id = %s", (product_id,))
+        product = cursor.fetchone()
+        
+        if not product:
+            return error_response('Product not found', 404)
+        
+        product_name = product[1]
+        
+        # Soft delete - set is_active to FALSE
+        cursor.execute("""
+            UPDATE products 
+            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP 
+            WHERE product_id = %s
+        """, (product_id,))
+        
+        conn.commit()
+        
+        return success_response({
+            'product_id': product_id,
+            'name': product_name
+        }, 'Product deleted successfully')
         
     except Exception as e:
         conn.rollback()
