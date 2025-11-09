@@ -3,10 +3,18 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from config import Config
 from db_connection import db
+import os
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    
+    # Configure upload settings
+    app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max file size
+    app.config['UPLOAD_FOLDER'] = 'static/uploads'
+    
+    # Ensure static folder exists
+    os.makedirs('static/uploads', exist_ok=True)
     
     # Initialize extensions
     CORS(app)
@@ -24,6 +32,7 @@ def create_app():
     from routes.order_routes import order_bp
     from routes.review_routes import review_bp
     from routes.wishlist_routes import wishlist_bp
+    from routes.upload_routes import upload_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(user_bp, url_prefix='/api/users')
@@ -33,6 +42,7 @@ def create_app():
     app.register_blueprint(order_bp, url_prefix='/api/orders')
     app.register_blueprint(review_bp, url_prefix='/api/reviews')
     app.register_blueprint(wishlist_bp, url_prefix='/api/wishlist')
+    app.register_blueprint(upload_bp, url_prefix='/api/upload')
     
     @app.route('/api/health')
     def health():
